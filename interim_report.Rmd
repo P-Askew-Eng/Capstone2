@@ -1,0 +1,120 @@
+---
+title: "Capstone Interim Report"
+author: "Paul Askew"
+date: "July 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(dplyr)
+library(data.table)
+library(ggplot2)
+
+```
+
+## JHU Data Science Capstone Interim Report
+
+The data files have already been downloaded from https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip and the en_US options are being used for this project. The first step is to get an idea of the scale of the data so the files are summarised in the table below which gives the size, number of lines and the number of characters in the longest line of each file:
+
+```{r file summary,echo=FALSE, warning=FALSE}
+
+blogs <- readLines("data/en_US.blogs.txt",skipNul = TRUE)
+news <- readLines("data/en_US.news.txt",skipNul = TRUE)
+twitter <- readLines("data/en_US.twitter.txt",skipNul = TRUE)
+
+require(data.table)
+datasets <- c("blogs", "news", "twitter")
+objSize <- sapply(datasets, function(x) {format(object.size(get(x)),units="Mb")})
+lines <- sapply(datasets, function(x) {length(get(x))})
+chars <- c(max(nchar(blogs)),max(nchar(news)),max(nchar(twitter)))#sapply did not work correctly for this
+overview <- data.table("Dataset" = datasets, "Object Size (Mb)" = objSize, "Lines" = lines,"Longest Line"=chars)
+overview
+
+```
+## Data Cleaning
+
+The data needs to be cleaned to remove things such as profanities, non text characters etc.  This was originally achieved using the tm package commonly used to support text mining [1].  However by switching to quanteda, the cleaning is dealt with in the creation of the n-grams.
+
+
+## N-grams
+
+N-grams are the basis for language prediction algorithms being groups of commonly found words. A quick analysis of the corpus reveals the key words below in terms of most common words (unigrams), pairs of words (bigrams) and groups of three words (trigrams). Analysis could go further but it is felt at this stage that this is of limited benefit as it is likely that bigger groups of words will be more like sentences and hence not of help in predicting the next word.
+
+For this quick look I originally tried using RWeka which seemed unreliable so I switched to the quanteda package.  I also took small samples of the corpus data to enable this to run quicker.
+The quanteda package also manages the cleaning
+```{r new ngram code, message=FALSE, warning=FALSE}
+library(quanteda)
+profanity_url <- "http://www.bannedwordlist.com/lists/swearWords.txt"
+profanity <- scan(profanity_url, "")
+blogsample<-sample(blogs,10000)
+newssample<-sample(news,10000)
+twittersample<-sample(news,10000)
+mydocs<-corpus(c(blogsample,twittersample,newssample))
+unigram <- dfm(mydocs, verbose=FALSE, ngrams=1, removeTwitter=TRUE, removePunct=TRUE,ignoredFeatures=c(profanity, stopwords("english")), concatenator=" ")
+bigram <- dfm(mydocs, verbose=FALSE, ngrams=2,removeTwitter=TRUE, removePunct=TRUE,ignoredFeatures=profanity, concatenator=" ") 
+trigram <- dfm(mydocs, verbose=FALSE, ngrams=3, removeTwitter=TRUE, removePunct=TRUE, ignoredFeatures=profanity, concatenator=" ")
+```
+
+
+### Frequency of words
+The following plots provide the top 25 for each of the n-grams together with a wordcloud.  Quanteda automatically creates a wordclouds if the dfm is called in the plot command.
+```{r function defintiion, cache=TRUE}
+getDF <- function(x){
+    Df <- as.data.frame(as.matrix(docfreq(x)))
+    Df <- sort(rowSums(Df), decreasing = TRUE)
+    Df <- data.frame(Words=names(Df), Frequency=Df)
+    Df
+}
+```
+
+#### 1-Gram
+```{r 1-grams, message=FALSE, warning=FALSE, cache=TRUE}
+plotUni <- ggplot(getDF(unigram)[1:25,], aes(x=reorder(Words, Frequency), y=Frequency)) +
+    geom_bar(stat = "identity", fill="maroon") +  coord_flip() +
+    theme(legend.title=element_blank()) +
+    xlab("Unigram") + ylab("Frequency") +
+    labs(title = "Top Unigrams by Frequency")
+
+print(plotUni) # View the uni-gram plot
+plot(unigram, min.freq = 500, random.order = FALSE, 
+              random.color = TRUE, rot.per = .2, colors = sample(colors()[2:128], 10))
+```
+
+#### 2-Gram
+```{r b1grams, message=FALSE, warning=FALSE, cache=TRUE}
+plotBi <- ggplot(getDF(bigram)[1:25,], aes(x=reorder(Words, Frequency), y=Frequency)) +
+    geom_bar(stat = "identity", fill="purple") +  coord_flip() +
+    theme(legend.title=element_blank()) +
+    xlab("Bigram") + ylab("Frequency") +
+    labs(title = "Top Bigrams by Frequency")
+
+print(plotBi) # View the bi-gram plot
+plot(bigram, min.freq = 500, random.order = FALSE, 
+              random.color = TRUE, rot.per = .2, colors = sample(colors()[2:128], 10))
+```
+
+#### 3-Gram
+```{r trigrams, message=FALSE, warning=FALSE, cache=TRUE}
+plotTri <- ggplot(getDF(trigram)[1:25,], aes(x=reorder(Words, Frequency), y=Frequency)) +
+    geom_bar(stat = "identity", fill="darkgreen") +  coord_flip() +
+    theme(legend.title=element_blank()) +
+    xlab("Trigram") + ylab("Frequency") +
+    labs(title = "Top Trigrams by Frequency")
+
+print(plotTri) # View the tri-gram plot
+plot(trigram, min.freq = 100, random.order = FALSE, 
+              random.color = TRUE, rot.per = .2, colors = sample(colors()[2:128], 10))
+```
+
+
+## Shiny App
+
+The objective of this project is to create a Shiny App that will predict the next word based on the previously input word.  The captured n grams will be the basis of this and I will look to use a back off type approach in which the higher n-grams are used.
+
+References
+
+[1] http://onepager.togaware.com/TextMiningO.pdf
+
+[2] http://www.bannedwordlist.com/lists/swearWords.txt
